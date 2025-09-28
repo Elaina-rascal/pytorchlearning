@@ -15,9 +15,8 @@ RUN pip install torch torchvision torchaudio --index-url https://download.pytorc
 # 安装yolo
 RUN pip install imutils ultralytics openvino
 #安装其他依赖
-RUN pip install zmq "numpy<2.0"
-# 安装ROS通信库
-RUN pip install roslibpy pyzmq
+
+RUN pip install jupyter
 
 USER root
 RUN echo "export ROS_LOCALHOST_ONLY=1" >> /home/$USERNAME/.bashrc \
