@@ -1,14 +1,14 @@
-name: Docker镜像信息检查
+name: Docker镜像构建与推送  
 
 on:
   push:
-    branches: ["**"]  #推送到[]分支时触发
+    branches: [ "**"]  #推送到[]分支时触发
     paths:
       - '**/Dockerfile*'      # 捕获所有以 Dockerfile 开头的文件，包括 Dockerfile 和 .Dockerfile
       - '**/.dockerfile*'     # 捕获以 .dockerfile 开头的文件
       - '**/build.bash'       # 捕获所有目录下的 build.bash 文件
   pull_request:
-    branches: ["main"]  #pr到[]分支时触发
+    branches: ["**"]  #pr到[]分支时触发
     paths:
       - '**/Dockerfile*'      # 捕获所有以 Dockerfile 开头的文件，包括 Dockerfile 和 .Dockerfile
       - '**/.dockerfile*'     # 捕获以 .dockerfile 开头的文件
@@ -17,9 +17,9 @@ env:
   # 可设置为 docker.io 或 ghcr.io
   REGISTRY: docker.io
   #仓库名
-  REPO_NAME: elainasuki/rc2025
+  REPO_NAME: elainasuki/ros
   # 是否构建arm64架构的镜像
-  BUILD_ARM64: false  # 你可以在这里设置是否构建 arm64
+  BUILD_ARM64: true  # 你可以在这里设置是否构建 arm64
 
 jobs:
   build-and-push:
@@ -34,6 +34,10 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # 获取最近两次提交的历史记录
+      # Add support for more platforms with QEMU (optional)
+        # https://github.com/docker/setup-qemu-action
       - name: 设置模拟器
         uses: docker/setup-qemu-action@v3
         with:
@@ -57,5 +61,40 @@ jobs:
             echo "IMAGE_REPO=${{ env.REGISTRY }}/${{ env.REPO_NAME }}" >> "$GITHUB_ENV"
           fi
           echo "BUILD_ARM64=${{ env.BUILD_ARM64 }}" >> "$GITHUB_ENV"  # 设置 BUILD_ARM64 环境变量
-      - name: 执行自定义构建脚本
-        run: bash ./.devcontainer/build.bash --github-action
+      - name: 检测更改并执行对应 build.bash
+        run: |
+          echo "🔍 检测改动的 Dockerfile/.dockerfile/build.bash 文件..."
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            RANGE="origin/${{ github.base_ref }}...${{ github.sha }}"
+          else
+            RANGE="${{ github.event.before }} ${{ github.sha }}"
+          fi
+
+          echo "🔁 检查范围: $RANGE"
+
+          git fetch origin ${{ github.base_ref }}
+
+          CHANGED_FILES=$(git diff --name-only $RANGE | \
+            grep -Ei '(^|/)Dockerfile|(^|/)\.dockerfile|(^|/)build\.bash')
+
+          if [[ -z "$CHANGED_FILES" ]]; then
+            echo "✅ 没有相关变更，跳过构建。"
+            exit 0
+          fi
+
+          echo "📄 检测到变更的文件:"
+          echo "$CHANGED_FILES"
+
+          # 获取每个变动文件所在目录，去重
+          CHANGED_DIRS=$(echo "$CHANGED_FILES" | xargs -n1 dirname | sort -u)
+
+          for dir in $CHANGED_DIRS; do
+            script_path="$dir/build.bash"
+            if [[ -f "$script_path" ]]; then
+              echo "🚀 执行 $script_path ..."
+              bash "$script_path" --github-action
+            else
+              echo "⚠️ $dir 中找不到 build.bash ，跳过。"
+            fi
+          done
