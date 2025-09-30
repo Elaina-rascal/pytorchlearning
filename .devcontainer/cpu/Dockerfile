@@ -19,7 +19,5 @@ RUN pip install imutils ultralytics openvino
 RUN pip install jupyter d2l==0.17.6   
 
 USER root
-RUN echo "export ROS_LOCALHOST_ONLY=1" >> /home/$USERNAME/.bashrc \
-    && echo "export PYTHONPATH=/home/Elaina/yolo:$PYTHONPATH" >> /home/$USERNAME/.bashrc \
-    && echo "source /opt/ros/humble/setup.bash" >> /home/${USERNAME}/.bashrc
+RUN && echo "source /opt/ros/humble/setup.bash" >> /home/${USERNAME}/.bashrc
 ENV PYTHONPATH="/home/Elaina/yolo:${PYTHONPATH}"
