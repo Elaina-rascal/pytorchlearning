@@ -16,7 +16,7 @@ RUN pip install torch torchvision torchaudio --index-url https://download.pytorc
 RUN pip install imutils ultralytics openvino
 #安装其他依赖
 
-RUN pip install jupyter
+RUN pip install jupyter d2l==0.17.6   
 
 USER root
 RUN echo "export ROS_LOCALHOST_ONLY=1" >> /home/$USERNAME/.bashrc \
