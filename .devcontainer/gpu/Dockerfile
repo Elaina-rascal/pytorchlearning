@@ -35,6 +35,7 @@ ENV LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:${LD_LIBRARY_PATH:-/usr/local/lib
 
 # 4. 优化PyTorch安装（节省空间）
 RUN pip3 install --no-cache-dir --upgrade pip \
+    && pip3 install --no-cache-dir --ignore-installed sympy \
     && pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 \
     && rm -rf $PIP_CACHE_DIR /tmp/* /var/tmp/*
 
