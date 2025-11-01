@@ -25,3 +25,28 @@ services:
     user: "Elaina"
     # runtime: "nvidia"
     working_dir: "/home/Elaina/pytorch" # 指定默认工作目录
+  gpu-service:
+    # build:
+    #   context: ..
+    #   dockerfile: .devcontainer/Dockerfile
+    image: elainasuki/other:pytorch_gpu
+    container_name: pytorch-gpu-container
+    environment:
+      - DISPLAY=${DISPLAY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - OMP_WAIT_POLICY=passive
+      - TERM=xterm-256color
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./..:/home/Elaina/pytorch
+      - /dev:/dev
+    network_mode: host
+    pid: "host" # 添加 pid 命名空间共享
+    ipc: "host" # 添加 ipc 命名空间共享    
+    privileged: true
+    stdin_open: true
+    tty: true
+    user: "Elaina"
+    # runtime: "nvidia"
+    working_dir: "/home/Elaina/pytorch" # 指定默认工作目录
