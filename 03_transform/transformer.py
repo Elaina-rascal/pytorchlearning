@@ -160,10 +160,10 @@ class DecoderBlock(nn.Module):
             key_size, query_size, value_size, num_hiddens, num_heads, dropout)
         self.addnorm2 = AddNorm(norm_shape, dropout)
         self.ffn = PositionFFN(ffn_num_input, ffn_num_hiddens,
-                                   num_hiddens)
+                                   dropout)
         self.addnorm3 = AddNorm(norm_shape, dropout)
 
-    def forward(self, X, state):
+    def forward(self, X:torch.Tensor, state):
         enc_outputs, enc_valid_lens = state[0], state[1]
         # 训练阶段，输出序列的所有词元都在同一时间处理，
         # 因此state[2][self.i]初始化为None。
@@ -191,6 +191,50 @@ class DecoderBlock(nn.Module):
         Y2 = self.attention2(Y, enc_outputs, enc_outputs, enc_valid_lens)
         Z = self.addnorm2(Y, Y2)
         return self.addnorm3(Z, self.ffn(Z)), state
+class TransformDecorder(nn.Module):
+    def __init__(self,vocab_size, key_size, query_size, value_size,
+                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
+                 num_heads, num_layers, dropout=0.1, bias=False):
+        super().__init__()
+        self.num_hiddens = num_hiddens
+        self.num_layers = num_layers
+        self.embedding = nn.Embedding(vocab_size, num_hiddens)
+        self.pos_encoding=PositionalEncoding(num_hiddens, dropout)
+        self.blks=nn.Sequential()
+        for i in range(num_layers):
+            self.blks.add_module("decoder_blk_%d",DecoderBlock(
+                key_size, query_size, value_size, num_hiddens,
+                norm_shape, ffn_num_input, ffn_num_hiddens,
+                num_heads, dropout, i))
+        self.dense = nn.Linear(num_hiddens, vocab_size)
+    def forward(self, X:torch.Tensor, state):
+        # 在以下代码段中，X的形状保持不变:(batch_size，序列长度，num_hiddens)
+        X = self.pos_encoding(self.embedding(X) * math.sqrt(
+            self.embedding.embedding_dim))
+        self._attention_weights = [[None] * len(self.blks) for _ in range (2)]
+        for i,blk in enumerate(self.blks):
+            X, state = blk(X, state)
+            if isinstance(blk, DecoderBlock):
+                # self._attention_weights[0][
+                #     i] = blk.attention1.attention.attention_weights
+                # # “编码器－解码器”自注意力权重
+                # self._attention_weights[1][
+                #     i] = blk.attention2.attention.attention_weights
+                X
+        return self.dense(X), state
+    def init_state(self, enc_outputs, enc_valid_lens, *args):
+        return [enc_outputs, enc_valid_lens, [None] * self.num_layers]
+class Transformer(nn.Module):
+    def __init__(self, encoder, decoder):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+    def forward(self, enc_X, dec_X, enc_valid_lens):
+        enc_outputs = self.encoder(enc_X, enc_valid_lens)
+        # state=[enc_outputs,enc_valid_lens,[None] * self.num_layers]
+        state=self.decoder.init_state(enc_outputs, enc_valid_lens)
+        return self.decoder(dec_X, state)
+        # return self.decoder(dec_X, dec_state)
 if __name__== "__main__":
     num_hiddens, num_heads = 100, 5
     attention = MultiAttention(
