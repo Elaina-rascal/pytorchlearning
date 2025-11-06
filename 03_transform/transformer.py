@@ -43,7 +43,7 @@ class MultiAttention(nn.Module):
         X = X.reshape(-1, num_heads, X.shape[1], X.shape[2])
         X = X.permute(0, 2, 1, 3)
         return X.reshape(X.shape[0], X.shape[1], -1)
-    def forward(self, queries:torch.Tensor, keys:torch.Tensor, values:torch.Tensor, valid_lens:torch.Tensor=None):
+    def forward(self, queries:torch.Tensor, keys:torch.Tensor, values:torch.Tensor, valid_lens:torch.Tensor=None,attn_mask:torch.Tensor=None):
         # queries，keys，values的形状:
         # (batch_size，查询或者“键－值”对的个数，num_hiddens)
         # valid_lens　　的形状:
@@ -54,14 +54,13 @@ class MultiAttention(nn.Module):
         queries = MultiAttention.transpose_qkv(self.W_q(queries), self.num_heads)
         keys = MultiAttention.transpose_qkv(self.W_k(keys), self.num_heads)
         values = MultiAttention.transpose_qkv(self.W_v(values), self.num_heads)
-
-        attn_mask = None
-        if valid_lens is not None:
-            # 原始valid_lens形状 (batch_size,)，复制到多头
-            valid_lens = torch.repeat_interleave(valid_lens, repeats=self.num_heads, dim=0)  # 形状 (batch×heads,)
-            # 生成掩码矩阵：形状 (batch×heads, 1, seq_k)
-            attn_mask = self.create_mask(valid_lens, keys.shape[1])  # keys.shape[1] 是 seq_k
-            attn_mask = attn_mask.to(dtype=queries.dtype)  # 匹配查询的dtype
+        if(attn_mask is not None):
+            if valid_lens is not None:
+                # 原始valid_lens形状 (batch_size,)，复制到多头
+                valid_lens = torch.repeat_interleave(valid_lens, repeats=self.num_heads, dim=0)  # 形状 (batch×heads,)
+                # 生成掩码矩阵：形状 (batch×heads, 1, seq_k)
+                attn_mask = self.create_mask(valid_lens, keys.shape[1])  # keys.shape[1] 是 seq_k
+                attn_mask = attn_mask.to(dtype=queries.dtype)  # 匹配查询的dtype
 
         # output的形状:(batch_size*num_heads，查询或者“键－值”对的个数,
         # num_hiddens/num_heads)
@@ -221,7 +220,7 @@ class TransformDecorder(nn.Module):
                 # self._attention_weights[1][
                 #     i] = blk.attention2.attention.attention_weights
                 X
-        return self.dense(X), state
+        return self.dense(X)
     def init_state(self, enc_outputs, enc_valid_lens, *args):
         return [enc_outputs, enc_valid_lens, [None] * self.num_layers]
 class Transformer(nn.Module):
@@ -229,7 +228,7 @@ class Transformer(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-    def forward(self, enc_X, dec_X, enc_valid_lens):
+    def forward(self, enc_X, dec_X, enc_valid_lens)->torch.Tensor:
         enc_outputs = self.encoder(enc_X, enc_valid_lens)
         # state=[enc_outputs,enc_valid_lens,[None] * self.num_layers]
         state=self.decoder.init_state(enc_outputs, enc_valid_lens)
