@@ -70,7 +70,15 @@ class Vocab:
         if not isinstance(tokens, (list, tuple)):
             return self.stoi.get(tokens, self.stoi['<unk>'])
         return [self.__getitem__(token) for token in tokens]
-
+    def to_tokens(self, indices):
+        """将索引（或索引列表）转换为对应的词元"""
+        if not isinstance(indices, (list, tuple, torch.Tensor)):
+            # 单个索引：直接返回对应的词元
+            return self.itos[indices] if indices < len(self.itos) else '<unk>'
+        # 索引列表（或Tensor）：逐个转换
+        if isinstance(indices, torch.Tensor):
+            indices = indices.tolist()  # 先将Tensor转为Python列表
+        return [self.to_tokens(idx) for idx in indices]
 
 def process_tokens(tokens, vocab, max_len):
     """
