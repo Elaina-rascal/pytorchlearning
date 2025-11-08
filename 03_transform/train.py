@@ -75,8 +75,9 @@ def train():
             
             # 前向传播
             optimizer.zero_grad()  # 清零梯度
-            output:torch.Tensor= transformer(src_X, tgt_input,src_valid_lens)  # 模型输出
-            
+            # output:torch.Tensor= transformer(src_X, tgt_input,src_mask)  # 模型输出
+            #这里面的输入不需要掩码，其中的每个查询都对应一个键-值对
+            output:torch.Tensor= transformer(src_X, tgt_input)  # 模型输出
             # 计算损失
             output = output.reshape(-1, output.shape[-1])  # 形状调整为 (batch*seq_len, vocab_size)
             tgt_Y = tgt_Y.reshape(-1)  # 形状调整为 (batch*seq_len,)

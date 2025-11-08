@@ -43,7 +43,7 @@ class MultiAttention(nn.Module):
         X = X.reshape(-1, num_heads, X.shape[1], X.shape[2])
         X = X.permute(0, 2, 1, 3)
         return X.reshape(X.shape[0], X.shape[1], -1)
-    def forward(self, queries:torch.Tensor, keys:torch.Tensor, values:torch.Tensor, valid_lens:torch.Tensor=None,attn_mask:torch.Tensor=None):
+    def forward(self, queries:torch.Tensor, keys:torch.Tensor, values:torch.Tensor,attn_mask:torch.Tensor=None,is_causal:bool=False):
         # queries，keys，values的形状:
         # (batch_size，查询或者“键－值”对的个数，num_hiddens)
         # valid_lens　　的形状:
@@ -54,17 +54,14 @@ class MultiAttention(nn.Module):
         queries = MultiAttention.transpose_qkv(self.W_q(queries), self.num_heads)
         keys = MultiAttention.transpose_qkv(self.W_k(keys), self.num_heads)
         values = MultiAttention.transpose_qkv(self.W_v(values), self.num_heads)
-        if(attn_mask is not None):
-            if valid_lens is not None:
-                # 原始valid_lens形状 (batch_size,)，复制到多头
-                valid_lens = torch.repeat_interleave(valid_lens, repeats=self.num_heads, dim=0)  # 形状 (batch×heads,)
-                # 生成掩码矩阵：形状 (batch×heads, 1, seq_k)
-                attn_mask = self.create_mask(valid_lens, keys.shape[1])  # keys.shape[1] 是 seq_k
-                attn_mask = attn_mask.to(dtype=queries.dtype)  # 匹配查询的dtype
-
+        if attn_mask is not None:
+        # 原始 attn_mask 形状：[batch_size, seq_len_q,query_len]
+        # 第二个表示当前维度,第三个表示被查询维度
+            attn_mask = ~attn_mask.bool()
+          
         # output的形状:(batch_size*num_heads，查询或者“键－值”对的个数,
         # num_hiddens/num_heads)
-        output = self.attention(queries, keys, values, attn_mask, dropout_p=0.1, is_causal=False)
+        output = self.attention(queries, keys, values, attn_mask,  is_causal=is_causal)
 
         # output_concat的形状:(batch_size，查询或者“键－值”对的个数，
         # num_hiddens)
@@ -116,9 +113,9 @@ class EncoderBlock(nn.Module):
         self.addnorm1 = AddNorm(norm_shape, dropout)
         self.ffn = PositionFFN(ffn_num_input, ffn_num_hiddens, dropout)
         self.addnorm2 = AddNorm(norm_shape, dropout)
-    def forward(self, X:torch.Tensor, valid_lens:torch.Tensor):
+    def forward(self, X:torch.Tensor, attn_mask:torch.Tensor):
         # 多头自注意力模块
-        Y = self.attention(X, X, X, valid_lens)
+        Y = self.attention(X, X, X, attn_mask)
         X = self.addnorm1(X, Y)
         # 前馈神经网络模块
         Y = self.ffn(X)
@@ -138,12 +135,12 @@ class Encoder(nn.Module):
                                                                norm_shape,ffn_num_input,
                                                                ffn_num_hiddens,num_heads,
                                                                dropout,bias))
-    def forward(self, X:torch.Tensor, valid_lens:torch.Tensor):
+    def forward(self, X:torch.Tensor,attn_mask:torch.Tensor):
         # 在以下代码段中，X的形状保持不变:(batch_size，序列长度，num_hiddens)
         X = self.pos_encoding(self.embedding(X) * math.sqrt(
             self.embedding.embedding_dim))
         for blk in self.blks:
-            X = blk(X, valid_lens)
+            X = blk(X, attn_mask)
         return X
 class DecoderBlock(nn.Module):
     """解码器中第i个块"""
@@ -163,31 +160,35 @@ class DecoderBlock(nn.Module):
         self.addnorm3 = AddNorm(norm_shape, dropout)
 
     def forward(self, X:torch.Tensor, state):
-        enc_outputs, enc_valid_lens = state[0], state[1]
+        enc_outputs = state[0]
         # 训练阶段，输出序列的所有词元都在同一时间处理，
         # 因此state[2][self.i]初始化为None。
         # 预测阶段，输出序列是通过词元一个接着一个解码的，
         # 因此state[2][self.i]包含着直到当前时间步第i个块解码的输出表示
-        if state[2][self.i] is None:
-            key_values = X
-        else:
-            key_values = torch.cat((state[2][self.i], X), axis=1)
-        state[2][self.i] = key_values
+        # if state[2][self.i] is None:
+        #     key_values = X
+        # else:
+        #     key_values = torch.cat((state[2][self.i], X), axis=1)
+        # state[2][self.i] = key_values
+        attn_mask=None
+        is_causal=False
         if self.training:
-            batch_size, num_steps, _ = X.shape
-            # dec_valid_lens的开头:(batch_size,num_steps),
-            # 其中每一行是[1,2,...,num_steps]
-            dec_valid_lens = torch.arange(
-                1, num_steps + 1, device=X.device).repeat(batch_size, 1)
-        else:
-            dec_valid_lens = None
+            seq_len_q = X.shape[1]  # 查询序列长度（当前输入的长度）
+            seq_len_k = X.shape[1]  # 键序列长度（历史+当前）
+            batch_size = X.shape[0]
+            # 生成下三角掩码（1表示有效位置）
+            attn_mask = torch.tril(torch.ones((seq_len_q, seq_len_k), device=X.device))  # [seq_len_q, seq_len_k]
+            attn_mask = attn_mask.unsqueeze(0).repeat(batch_size, 1, 1)  # 扩展到batch维度
+            is_causal=True
+        
 
         # 自注意力
-        X2 = self.attention1(X, key_values, key_values, dec_valid_lens)
+        X2 = self.attention1(X, X, X, is_causal=is_causal)
+        #不传入位置掩码，直接传入is_causal参数,因为在自注意力里面会改变张量大小，外部传入会出事
         Y = self.addnorm1(X, X2)
         # 编码器－解码器注意力。
         # enc_outputs的开头:(batch_size,num_steps,num_hiddens)
-        Y2 = self.attention2(Y, enc_outputs, enc_outputs, enc_valid_lens)
+        Y2 = self.attention2(Y, enc_outputs, enc_outputs)
         Z = self.addnorm2(Y, Y2)
         return self.addnorm3(Z, self.ffn(Z)), state
 class TransformDecorder(nn.Module):
@@ -221,17 +222,17 @@ class TransformDecorder(nn.Module):
                 #     i] = blk.attention2.attention.attention_weights
                 X
         return self.dense(X)
-    def init_state(self, enc_outputs, enc_valid_lens, *args):
-        return [enc_outputs, enc_valid_lens, [None] * self.num_layers]
+    def init_state(self, enc_outputs, enc_mask, *args):
+        return [enc_outputs, enc_mask, [None] * self.num_layers]
 class Transformer(nn.Module):
     def __init__(self, encoder, decoder):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-    def forward(self, enc_X, dec_X, enc_valid_lens)->torch.Tensor:
-        enc_outputs = self.encoder(enc_X, enc_valid_lens)
+    def forward(self, enc_X, dec_X, attn_mask=None)->torch.Tensor:
+        enc_outputs = self.encoder(enc_X, attn_mask)
         # state=[enc_outputs,enc_valid_lens,[None] * self.num_layers]
-        state=self.decoder.init_state(enc_outputs, enc_valid_lens)
+        state=self.decoder.init_state(enc_outputs, attn_mask)
         return self.decoder(dec_X, state)
         # return self.decoder(dec_X, dec_state)
 if __name__== "__main__":

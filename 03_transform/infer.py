@@ -72,7 +72,7 @@ def main():
     transformer.load_state_dict(checkpoint['model_state_dict'])  # 只加载模型参数部分
     
     # 进行翻译推断
-    test_sentence = "You JJ B ."
+    test_sentence = "what you like is your life ."
     translation = infer(transformer, test_sentence, src_vocab, Target_vocab, device)
     print(f"源句子: {test_sentence}")
     print(f"翻译结果: {translation}")
