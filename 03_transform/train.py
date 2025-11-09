@@ -6,11 +6,11 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
 def train():
-    num_hiddens, num_layers, dropout, batch_size = 32, 2, 0.1, 64
+    num_hiddens, num_layers, dropout, batch_size = 64, 4, 0.1,64
     lr, num_epochs, device = 0.005, 200, torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    ffn_num_input, ffn_num_hiddens, num_heads = 32, 64, 4
-    key_size, query_size, value_size = 32, 32, 32
-    norm_shape = [32]
+    ffn_num_input, ffn_num_hiddens, num_heads = 64, 128, 4
+    key_size, query_size, value_size = 64, 64, 64
+    norm_shape = [64]
 
     data_path = "/home/Elaina/pytorch/Data/cmn.txt"
     src_lang, tgt_lang = 'en', 'zh'
