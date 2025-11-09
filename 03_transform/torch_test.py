@@ -9,7 +9,7 @@ if torch.cuda.is_available():
 
 # 原代码（保持不变）
 a = torch.normal(0, 1, size=(3, 1))
-b = torch.normal(0, 1, size=(3, 4))
+b = torch.normal(0, 1, size=(2,3, 4))
 print("\nCPU上的a:", a)
 print("CPU上的b:", b)
 print("CPU上的a*b:", a*b)
@@ -23,5 +23,6 @@ if torch.cuda.is_available():
     print("GPU上的b_gpu:", b_gpu)
     print("GPU上的a_gpu*b_gpu:", a_gpu*b_gpu)
     print("a_gpu所在设备:", a_gpu.device)  # 确认是否在GPU上
+    print(b[0])
 else:
     print("\n未检测到可用GPU，所有计算在CPU上运行")

@@ -48,5 +48,5 @@ services:
     stdin_open: true
     tty: true
     user: "Elaina"
-    # runtime: "nvidia"
+    runtime: "nvidia"
     working_dir: "/home/Elaina/pytorch" # 指定默认工作目录
