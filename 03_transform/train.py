@@ -3,7 +3,8 @@ from load_data import *
 import torch,os
 import torch.optim as optim
 import torch.nn as nn
-
+import matplotlib.pyplot as plt
+import numpy as np
 def train():
     num_hiddens, num_layers, dropout, batch_size = 32, 2, 0.1, 64
     lr, num_epochs, device = 0.005, 200, torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -56,55 +57,73 @@ def train():
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
     os.makedirs('models', exist_ok=True)
     best_loss = float('inf')
+    existing_model_loss = None
+    if os.path.exists('models/best_transformer.pth'):
+        checkpoint = torch.load('models/best_transformer.pth', map_location=device, weights_only=True)
+        existing_model_loss = checkpoint['loss']
+        best_loss = existing_model_loss
+        print(f"发现现有模型，其损失为: {existing_model_loss:.4f}")
+        transformer.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    # 可视化设置
+    plt.ion()  # 开启交互模式
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training Loss (per Epoch)")  # 修改标题为每轮损失
+    line, = ax.plot([], [], label="Epoch Loss")  # 线条标签改为每轮损失
+    ax.legend()
+
+    # 存储每个epoch的损失和对应的epoch索引（用于绘图）
+    epoch_losses = []  # 存储每个epoch的平均损失
+    epoch_indices = []  # 存储对应的epoch索引（1,2,3...）
+
     # 训练循环
     for epoch in range(num_epochs):
         transformer.train()
         total_loss = 0.0
-        batch_count = 0  # 用于计数批次
+        batch_losses = []
         
         print(f"\nEpoch {epoch+1}/{num_epochs} 开始训练...")
         for batch in dataloader:
-            # 数据预处理
             src_X = batch['src_indices'].to(device)
-            src_mask = batch['src_mask'].to(device)
             tgt_X = batch['tgt_indices'].to(device)
-            src_valid_lens = src_mask.sum(dim=1).to(device)  # 适用于 True=有效 的掩码
-            # 目标序列偏移（教师强制）
-            tgt_Y = tgt_X[:, 1:].contiguous()  # 目标：去掉第一个token（如<BOS>）
-            tgt_input = tgt_X[:, :-1].contiguous()  # 解码器输入：去掉最后一个token
+            tgt_Y = tgt_X[:, 1:].contiguous().reshape(-1)
+            tgt_input = tgt_X[:, :-1].contiguous()
             
-            # 前向传播
-            optimizer.zero_grad()  # 清零梯度
-            # output:torch.Tensor= transformer(src_X, tgt_input,src_mask)  # 模型输出
-            #这里面的输入不需要掩码，其中的每个查询都对应一个键-值对
-            output:torch.Tensor= transformer(src_X, tgt_input)  # 模型输出
-            # 计算损失
-            output = output.reshape(-1, output.shape[-1])  # 形状调整为 (batch*seq_len, vocab_size)
-            tgt_Y = tgt_Y.reshape(-1)  # 形状调整为 (batch*seq_len,)
+            optimizer.zero_grad()
+            output = transformer(src_X, tgt_input)
+            output = output.reshape(-1, output.shape[-1])
             loss = loss_fn(output, tgt_Y)
             
-            # 反向传播与参数更新
             loss.backward()
             optimizer.step()
             
-            # 累计损失
             total_loss += loss.item()
-            batch_count += 1
-            
-            # 每10个批次打印一次当前损失（可选）
-            if batch_count % 10 == 0:
-                print(f"  批次 {batch_count}/{len(dataloader)}，当前损失：{loss.item():.4f}")
+            batch_losses.append(loss.item())
         
-        # 计算本轮平均损失
-        avg_loss = total_loss / len(dataloader)
-        print(f"Epoch {epoch+1} 结束，平均损失：{avg_loss:.4f}")
+        avg_epoch_loss = total_loss / len(dataloader)
+        print(f"Epoch {epoch+1} 结束，平均损失：{avg_epoch_loss:.4f}")
         
-        # 学习率调整
-        scheduler.step(avg_loss)
+        # 每轮都记录损失和索引
+        epoch_losses.append(avg_epoch_loss)
+        epoch_indices.append(epoch + 1)  # 当前epoch编号（1-based）
         
-        # 保存最佳模型
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        # 每轮都更新图像
+        line.set_data(epoch_indices, epoch_losses)
+        ax.relim()  # 重新计算坐标轴范围（关键：适应新数据）
+        ax.autoscale_view()  # 自动调整视图范围
+        plt.draw()  # 绘制更新
+        plt.pause(0.01)  # 短暂暂停以刷新图像
+        
+        scheduler.step(avg_epoch_loss)
+        
+        if existing_model_loss is not None and avg_epoch_loss < existing_model_loss:
+            print(f"当前模型损失({avg_epoch_loss:.4f})优于现有模型({existing_model_loss:.4f})")
+        
+        if avg_epoch_loss < best_loss:
+            best_loss = avg_epoch_loss
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': transformer.state_dict(),
@@ -112,8 +131,12 @@ def train():
                 'loss': best_loss,
             }, 'models/best_transformer.pth')
             print(f"  保存最佳模型（损失：{best_loss:.4f}）")
-    
-    print("\n训练完成！")
 
+    # 训练完成后保存并显示最终图像
+    plt.ioff()  # 关闭交互模式
+    ax.set_title("Training Loss (Final)")
+    plt.savefig("loss_curve.png")
+    plt.show()
+    print("\n训练完成！")
 if __name__ == "__main__":
     train()
