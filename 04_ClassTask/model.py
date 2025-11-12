@@ -93,7 +93,7 @@ class SequenceXYNorm(nn.Module):
         return x_normed
 class GRUEnhancer(nn.Module):
     """基于GRU的特征增强模块，适合输入输出变化较小的场景"""
-    def __init__(self, feature_dim=2, hidden_dim=16, dropout=0.0, eps=1e-6):
+    def __init__(self, feature_dim=4, hidden_dim=16, dropout=0.0, eps=1e-6):
         super().__init__()
         self.feature_dim = feature_dim
         self.hidden_dim = hidden_dim
