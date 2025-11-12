@@ -1,8 +1,8 @@
 import pandas as pd
-import torch
+import torch,random
 from collections import defaultdict
 
-def LoadData(file_path,min_len=7) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+def LoadData(file_path, min_len=7,sheet_name='sheet1') -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
     '''
     加载行人轨迹预测数据集，返回编码器输入、解码器输入、解码器输出
     编码器输入：同一时刻对应的车辆中心点及时间帧(t, x, y)
@@ -11,7 +11,7 @@ def LoadData(file_path,min_len=7) -> tuple[list[torch.Tensor], list[torch.Tensor
     '''
     # 读取原始xlsx文件
     data = pd.read_excel(file_path, sheet_name=None)
-    df = data["sheet1"][['时间帧', 'ID', '类别', '中心坐标x', '中心坐标y']].copy()
+    df = data[sheet_name][['时间帧', 'ID', '类别', '中心坐标x', '中心坐标y']].copy()
     
     # 将类别文本转换为数字（Vehicle->0，Pedestrian->1）
     df['类别'] = df['类别'].map({'Vehicle': 0, 'Pedestrian': 1})
@@ -65,16 +65,107 @@ def LoadData(file_path,min_len=7) -> tuple[list[torch.Tensor], list[torch.Tensor
     decoder_outputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in decoder_outputs]
     
     return encoder_inputs_tensor, decoder_inputs_tensor, decoder_outputs_tensor
+def create_batch(
+    encoder_inputs,
+    decoder_inputs,
+    decoder_outputs,
+    seq_len: int,
+    batch_size: int
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    '''
+    将数据转换为单批次格式 [batch_size, seq_len, feature_size]
+    
+    参数:
+        encoder_inputs: 编码器输入列表
+        decoder_inputs: 解码器输入列表
+        decoder_outputs: 解码器输出列表
+        seq_len: 每个子序列的固定长度
+        batch_size: 批次大小
+    
+    返回:
+        三个张量，形状均为 [batch_size, seq_len, feature_size]
+    
+    异常:
+        当有效样本数不足batch_size时抛出ValueError
+    '''
+    # 筛选出长度足够的样本索引（所有序列都满足长度要求）
+    valid_indices = []
+    for i in range(len(encoder_inputs)):
+        if (len(encoder_inputs[i]) >= seq_len and 
+            len(decoder_inputs[i]) >= seq_len and 
+            len(decoder_outputs[i]) >= seq_len):
+            valid_indices.append(i)
+    
+    # 检查有效样本数是否足够
+    if len(valid_indices) < batch_size:
+        raise ValueError(f"有效样本数不足（需要{batch_size}个，实际只有{len(valid_indices)}个）")
+    
+    # 随机选择batch_size个样本
+    selected_indices = random.sample(valid_indices, batch_size)
+    
+    batch_enc = []
+    batch_dec_in = []
+    batch_dec_out = []
+    
+    for idx in selected_indices:
+        # 获取当前样本的完整序列
+        enc_seq = encoder_inputs[idx]
+        dec_in_seq = decoder_inputs[idx]
+        dec_out_seq = decoder_outputs[idx]
+        
+        # 随机选择子序列的起始位置
+        max_start = len(enc_seq) - seq_len
+        start = random.randint(0, max_start)
+        end = start + seq_len
+        
+        # 截取固定长度的子序列
+        batch_enc.append(enc_seq[start:end])
+        batch_dec_in.append(dec_in_seq[start:end])
+        batch_dec_out.append(dec_out_seq[start:end])
+    
+    # 堆叠成 [batch_size, seq_len, feature_size] 格式的张量
+    return (
+        torch.stack(batch_enc),
+        torch.stack(batch_dec_in),
+        torch.stack(batch_dec_out)
+    )
+
 
 if __name__ == "__main__":
     file_path = "/pytorch/Data/data.xlsx"
-    encoder_inputs, decoder_inputs, decoder_outputs = LoadData(file_path)
-    print(f"样本数量: {len(encoder_inputs)}")
+    # 加载原始数据
+    encoder_inputs, decoder_inputs, decoder_outputs = [],[],[]
+    #增加sheet1-4的数据
+    for i in range(4):
+        sheet_name='Sheet'+str(i+1)
+        once_encoder_inputs,once_decorder_inputs,once_decoder_outputs=LoadData(file_path,7,sheet_name)
+        encoder_inputs+=once_encoder_inputs
+        decoder_inputs+=once_decorder_inputs
+        decoder_outputs+=once_decoder_outputs
+    print(f"原始样本数量: {len(encoder_inputs)}")
+    
     if len(encoder_inputs) > 0:
-        print(f"第一个样本的编码器输入形状: {encoder_inputs[0].shape}")  # 应为 (轨迹长度, 3)，3对应(t, x, y)
-        print(f"第一个样本的解码器输入形状: {decoder_inputs[0].shape}")  # 应为 (轨迹长度, 3)
-        print(f"第一个样本的解码器输出形状: {decoder_outputs[0].shape}")  # 应为 (轨迹长度, 3)
-        print("\n第一个样本的编码器输入前3条数据:")
-        print(encoder_inputs[0][:3])
-        print("\n第一个样本的解码器输入前3条数据:")
-        print(decoder_inputs[0][:3])
+        # 生成单批次数据（示例参数）
+        seq_len = 5  # 每个子序列的时间步长度
+        batch_size = 80  # 批次大小
+        
+        try:
+            enc_batch, dec_in_batch, dec_out_batch = create_batch(
+                encoder_inputs,
+                decoder_inputs,
+                decoder_outputs,
+                seq_len=seq_len,
+                batch_size=batch_size
+            )
+            
+            # 输出形状：[batch_size, seq_len, feature_size]
+            print(f"\n编码器输入批次形状: {enc_batch.shape}")    # [3, 5, 3]
+            print(f"解码器输入批次形状: {dec_in_batch.shape}")  # [3, 5, 3]
+            print(f"解码器输出批次形状: {dec_out_batch.shape}")  # [3, 5, 3]
+            
+            # 打印第一个样本的前3个时间步
+            print("\n第一个样本的编码器输入（前3步）:")
+            print(enc_batch[0, :3])
+            
+        except ValueError as e:
+            print(f"错误: {e}")
