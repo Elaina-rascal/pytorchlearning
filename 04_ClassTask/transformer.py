@@ -1,253 +1,87 @@
-import math
+import torch.nn as nn
+from torch.nn import functional as F
 import torch
-from torch import nn, functional as F
-class MultiAttention(nn.Module):
-    """多头自注意力机制"""
-    def __init__(self, key_size,query_size,value_size,num_hiddens,num_heads,dropout=0.1,bias=False):
-        self.num_heads=1
-        self.num_heads = num_heads
-        self.attention = nn.functional.scaled_dot_product_attention
-        super().__init__()  
-        self.W_q = nn.Linear(query_size, num_hiddens, bias=bias)
-        self.W_k = nn.Linear(key_size, num_hiddens, bias=bias)
-        self.W_v = nn.Linear(value_size, num_hiddens, bias=bias)
-        self.W_o = nn.Linear(num_hiddens, num_hiddens, bias=bias)
-    def transpose_qkv(self,X:torch.Tensor, num_heads):
-        """为了多注意力头的并行计算而变换形状"""
-        # 输入X的形状:(batch_size，查询或者“键－值”对的个数，num_hiddens)
-        # 输出X的形状:(batch_size，查询或者“键－值”对的个数，num_heads，
-        # num_hiddens/num_heads)
-        X = X.reshape(X.shape[0], X.shape[1], num_heads, -1)
-
-        # 输出X的形状:(batch_size，num_heads，查询或者“键－值”对的个数,
-        # num_hiddens/num_heads)
-        X = X.permute(0, 2, 1, 3)
-
-        # 最终输出的形状:(batch_size*num_heads,查询或者“键－值”对的个数,
-        # num_hiddens/num_heads)
-        return X.reshape(-1, X.shape[2], X.shape[3])
-
-    def create_mask(self, valid_lens: torch.Tensor, seq_len: int):
-        """
-        valid_lens: 形状 (batch_size,)，每个元素是该样本的有效长度
-        seq_len: 实际序列长度（键-值对个数）
-        返回: 形状 (batch_size, 1, seq_len) 的掩码矩阵，无效位置为True（被掩码）
-        """
-        batch_size = valid_lens.shape[0]
-        # 生成 (batch_size, seq_len) 的矩阵，每个位置表示是否超过有效长度
-        mask = torch.arange(seq_len, device=valid_lens.device).expand(batch_size, seq_len) >= valid_lens.unsqueeze(1)
-        return mask.unsqueeze(1)  # 扩展维度以匹配注意力权重的形状
-    
-    #@save
-    def transpose_output(self,X:torch.Tensor, num_heads):
-        """逆转transpose_qkv函数的操作"""
-        X = X.reshape(-1, num_heads, X.shape[1], X.shape[2])
-        X = X.permute(0, 2, 1, 3)
-        return X.reshape(X.shape[0], X.shape[1], -1)
-    def forward(self, queries:torch.Tensor, keys:torch.Tensor, values:torch.Tensor,attn_mask=None,is_causal:bool=False):
-        # queries，keys，values的形状:
-        # (batch_size，查询或者“键－值”对的个数，num_hiddens)
-        # valid_lens　　的形状:
-        # (batch_size，)或(batch_size，查询的个数)
-        # 经过变换后，输出的queries，keys，values的形状:
-        # (batch_size*num_heads，查询或者“键－值”对的个数，
-        # num_hiddens/num_heads)
-        queries = self.transpose_qkv(self.W_q(queries), self.num_heads)
-        keys = self.transpose_qkv(self.W_k(keys), self.num_heads)
-        values = self.transpose_qkv(self.W_v(values), self.num_heads)
-        if attn_mask is not None:
-        # 原始 attn_mask 形状：[batch_size, seq_len_q,query_len]
-        # 第二个表示当前维度,第三个表示被查询维度
-            attn_mask = ~attn_mask.bool()
-          
-        # output的形状:(batch_size*num_heads，查询或者“键－值”对的个数,
-        # num_hiddens/num_heads)
-        output = self.attention(queries, keys, values, attn_mask,  is_causal=is_causal)
-
-        # output_concat的形状:(batch_size，查询或者“键－值”对的个数，
-        # num_hiddens)
-        output_concat = self.transpose_output(output, self.num_heads)
-
-        return self.W_o(output_concat)
-class PositionFFN(nn.Module):
-    """位置前馈网络,一个多层感知机"""
-    def __init__(self, num_hiddens, ffn_num_hiddens, dropout=0.1):
+class LightweightAttention(nn.Module):
+    """轻量级注意力模块 先行人自查询,再与车辆特征交叉查询"""
+    def __init__(self, feature_dim=2, hidden_dim=16, dropout=0.1):
         super().__init__()
-        self.dense1 = nn.Linear(num_hiddens, ffn_num_hiddens)
-        self.relu=nn.ReLU()
-        self.dense2 = nn.Linear(ffn_num_hiddens, num_hiddens)
-        self.dropout = nn.Dropout(dropout)
-    def forward(self, X:torch.Tensor):
-        return self.dense2(self.dropout(self.relu(self.dense1(X))))
-class AddNorm(nn.Module):
-    """残差连接后进行层归一化"""
-    def __init__(self, normalized_shape, dropout=0.1):
-        super().__init__()
-        self.dropout = nn.Dropout(dropout)
-        self.ln = nn.LayerNorm(normalized_shape)
-    def forward(self, X:torch.Tensor, Y:torch.Tensor):
-        return self.ln(X + self.dropout(Y))
-#@save
-class PositionalEncoding(nn.Module):
-    """位置编码"""
-    def __init__(self, num_hiddens, dropout, max_len=1000):
-        super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(dropout)
-        # 创建一个足够长的P
-        self.P = torch.zeros((1, max_len, num_hiddens))
-        X = torch.arange(max_len, dtype=torch.float32).reshape(
-            -1, 1) / torch.pow(10000, torch.arange(
-            0, num_hiddens, 2, dtype=torch.float32) / num_hiddens)
-        self.P[:, :, 0::2] = torch.sin(X)
-        self.P[:, :, 1::2] = torch.cos(X)
-
-    def forward(self, X):
-        X = X + self.P[:, :X.shape[1], :].to(X.device)
-        return self.dropout(X)
-class EncoderBlock(nn.Module):
-    def __init__(self,key_size, query_size, value_size, num_hiddens,
-                 norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
-                 dropout=0.1, bias=False):
-        super().__init__()
-        self.attention = MultiAttention(
-            key_size, query_size, value_size, num_hiddens, num_heads, dropout, bias)
-        self.addnorm1 = AddNorm(norm_shape, dropout)
-        self.ffn = PositionFFN(ffn_num_input, ffn_num_hiddens, dropout)
-        self.addnorm2 = AddNorm(norm_shape, dropout)
-    def forward(self, X:torch.Tensor, attn_mask:torch.Tensor):
-        # 多头自注意力模块
-        Y = self.attention(X, X, X, attn_mask)
-        X = self.addnorm1(X, Y)
-        # 前馈神经网络模块
-        Y = self.ffn(X)
-        return self.addnorm2(X, Y)
-class Encoder(nn.Module):
-    """Transformer编码器"""
-    def __init__(self,feature_size,key_size, query_size, value_size,
-                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
-                 num_heads, num_layers, dropout=0.1, bias=False):
-        super().__init__()
-        self.nn=nn.Linear(feature_size,num_hiddens)
-        # self.pos_encoding=PositionalEncoding(num_hiddens, dropout)
-        self.blks = nn.Sequential()
-        for i in range(num_layers):
-            self.blks.add_module("encoder_blk_%d",EncoderBlock(key_size,query_size,
-                                                               value_size,num_hiddens,
-                                                               norm_shape,ffn_num_input,
-                                                               ffn_num_hiddens,num_heads,
-                                                               dropout,bias))
-    def forward(self, X:torch.Tensor,attn_mask:torch.Tensor):
-        # 在以下代码段中，X的形状保持不变:(batch_size，序列长度，num_hiddens)
-        X=self.nn(X)
-        for blk in self.blks:
-            X = blk(X, attn_mask)
-        return X
-class DecoderBlock(nn.Module):
-    """解码器中第i个块"""
-    def __init__(self, key_size, query_size, value_size, num_hiddens,
-                 norm_shape, ffn_num_input, ffn_num_hiddens, num_heads,
-                 dropout, i, **kwargs):
-        super(DecoderBlock, self).__init__(**kwargs)
-        self.i = i
-        self.attention1 = MultiAttention(
-            key_size, query_size, value_size, num_hiddens, num_heads, dropout)
-        self.addnorm1 = AddNorm(norm_shape, dropout)
-        self.attention2 = MultiAttention(
-            key_size, query_size, value_size, num_hiddens, num_heads, dropout)
-        self.addnorm2 = AddNorm(norm_shape, dropout)
-        self.ffn = PositionFFN(ffn_num_input, ffn_num_hiddens,
-                                   dropout)
-        self.addnorm3 = AddNorm(norm_shape, dropout)
-
-    def forward(self, X:torch.Tensor, state):
-        enc_outputs = state[0]
-        # 训练阶段，输出序列的所有词元都在同一时间处理，
-        # 因此state[2][self.i]初始化为None。
-        # 预测阶段，输出序列是通过词元一个接着一个解码的，
-        # 因此state[2][self.i]包含着直到当前时间步第i个块解码的输出表示
-        # if state[2][self.i] is None:
-        #     key_values = X
-        # else:
-        #     key_values = torch.cat((state[2][self.i], X), axis=1)
-        # state[2][self.i] = key_values
-        attn_mask=None
-        is_causal=False
-        if self.training:
-            seq_len_q = X.shape[1]  # 查询序列长度（当前输入的长度）
-            seq_len_k = X.shape[1]  # 键序列长度（历史+当前）
-            batch_size = X.shape[0]
-            # 生成下三角掩码（1表示有效位置）
-            attn_mask = torch.tril(torch.ones((seq_len_q, seq_len_k), device=X.device))  # [seq_len_q, seq_len_k]
-            attn_mask = attn_mask.unsqueeze(0).repeat(batch_size, 1, 1)  # 扩展到batch维度
-            is_causal=True
+        self.feature_dim = feature_dim
+        self.hidden_dim = hidden_dim
         
-
-        # 自注意力
-        X2 = self.attention1(X, X, X, is_causal=is_causal)
-        #不传入位置掩码，直接传入is_causal参数,因为在自注意力里面会改变张量大小，外部传入会出事
-        Y = self.addnorm1(X, X2)
-        # 编码器－解码器注意力。
-        # enc_outputs的开头:(batch_size,num_steps,num_hiddens)
-        Y2 = self.attention2(Y, enc_outputs, enc_outputs)
-        Z = self.addnorm2(Y, Y2)
-        return self.addnorm3(Z, self.ffn(Z)), state
-class TransformDecoder(nn.Module):
-    def __init__(self,feature_size,key_size, query_size, value_size,
-                 num_hiddens, norm_shape, ffn_num_input, ffn_num_hiddens,
-                 num_heads, num_layers, dropout=0.1, bias=False):
-        super().__init__()
-        self.feature_size=feature_size
-        self.num_hiddens = num_hiddens
-        self.num_layers = num_layers
-        self.nn=nn.Linear(feature_size,num_hiddens)
-        # self.pos_encoding=PositionalEncoding(num_hiddens, dropout)
-        self.blks=nn.Sequential()
-        for i in range(num_layers):
-            self.blks.add_module("decoder_blk_%d",DecoderBlock(
-                key_size, query_size, value_size, num_hiddens,
-                norm_shape, ffn_num_input, ffn_num_hiddens,
-                num_heads, dropout, i))
-        self.dense = nn.Linear(num_hiddens, feature_size)
-    def forward(self, X:torch.Tensor, state):
-        # 在以下代码段中，X的形状保持不变:(batch_size，序列长度，num_hiddens)
-        # X = self.pos_encoding(self.embedding(X) * math.sqrt(
-        #     self.embedding.embedding_dim))
-        #先经过nn
-        X=self.nn(X)
-        self._attention_weights = [[None] * len(self.blks) for _ in range (2)]
-        for i,blk in enumerate(self.blks):
-            X, state = blk(X, state)
-            if isinstance(blk, DecoderBlock):
-                # self._attention_weights[0][
-                #     i] = blk.attention1.attention.attention_weights
-                # # “编码器－解码器”自注意力权重
-                # self._attention_weights[1][
-                #     i] = blk.attention2.attention.attention_weights
-                X
-        return self.dense(X)
-    def init_state(self, enc_outputs, enc_mask, *args):
-        return [enc_outputs, enc_mask, [None] * self.num_layers]
-class Transformer(nn.Module):
-    def __init__(self, encoder, decoder):
-        super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-    def forward(self, enc_X, dec_X, attn_mask=None)->torch.Tensor:
-        enc_outputs = self.encoder(enc_X, attn_mask)
-        # state=[enc_outputs,enc_valid_lens,[None] * self.num_layers]
-        state=self.decoder.init_state(enc_outputs, attn_mask)
-        return self.decoder(dec_X, state)
-        # return self.decoder(dec_X, dec_state)
+        # 特征映射层（将2维特征映射到隐藏维度）
+        self.proj_p = nn.Linear(feature_dim, hidden_dim)  # 行人特征映射
+        self.proj_v = nn.Linear(feature_dim, hidden_dim)  # 车辆特征映射
+        
+        # 自注意力参数（查询/键/值线性变换）
+        self.q_self = nn.Linear(hidden_dim, hidden_dim)
+        self.k_self = nn.Linear(hidden_dim, hidden_dim)
+        self.v_self = nn.Linear(hidden_dim, hidden_dim)
+        
+        # 交叉注意力参数（行人-车辆）
+        self.q_cross = nn.Linear(hidden_dim, hidden_dim)
+        self.k_cross = nn.Linear(hidden_dim, hidden_dim)
+        self.v_cross = nn.Linear(hidden_dim, hidden_dim)
+        
+        # 输出层与残差连接
+        self.output_proj = nn.Linear(hidden_dim, feature_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(feature_dim)
+        
+    def forward(self, pedestrian_feat, vehicle_feats):
+        """
+        Args:
+            pedestrian_feat: 行人特征 (batch_size, seq_len_p, 2)
+            vehicle_feats: 车辆特征 (batch_size, seq_len_v, 2)
+        Returns:
+            增强后的行人特征 (batch_size, seq_len_p, 2)
+        """
+        residual = pedestrian_feat  # 残差连接起点
+        batch_size = pedestrian_feat.shape[0]
+        
+        # 1. 特征映射到高维
+        p_hidden = self.proj_p(pedestrian_feat)  # (B, P, H)
+        v_hidden = self.proj_v(vehicle_feats)    # (B, V, H)
+        
+        # 2. 行人自查询（使用PyTorch内置scaled_dot_product_attention）
+        q_self = self.q_self(p_hidden)  # (B, P, H)
+        k_self = self.k_self(p_hidden)  # (B, P, H)
+        v_self = self.v_self(p_hidden)  # (B, P, H)
+        # 自注意力计算（无掩码）
+        self_attn_out = F.scaled_dot_product_attention(
+            q_self, k_self, v_self, 
+            attn_mask=None, 
+            dropout_p=self.dropout.p if self.training else 0.0
+        )  # (B, P, H)
+        
+        # 3. 与车辆特征交叉查询（行人查询，车辆提供键值）
+        q_cross = self.q_cross(self_attn_out)  # (B, P, H)
+        k_cross = self.k_cross(v_hidden)       # (B, V, H)
+        v_cross = self.v_cross(v_hidden)       # (B, V, H)
+        # 交叉注意力计算（无掩码）
+        cross_attn_out = F.scaled_dot_product_attention(
+            q_cross, k_cross, v_cross, 
+            attn_mask=None, 
+            dropout_p=self.dropout.p if self.training else 0.0
+        )  # (B, P, H)
+        
+        # 4. 输出映射与残差连接
+        output = self.output_proj(cross_attn_out)  # (B, P, 2)
+        output = residual +output  # 残差+层归一化
+        
+        return output
 if __name__== "__main__":
-    num_hiddens, num_heads = 100, 5
-    attention = MultiAttention(
-        key_size=num_hiddens, query_size=num_hiddens,
-        value_size=num_hiddens, num_hiddens=num_hiddens,
-        num_heads=num_heads, dropout=0.1)
-    print(attention.eval())
-    
-    batch_size, num_queries = 2, 4
-    num_kvpairs, valid_lens =  6, torch.tensor([3, 2])
-    X = torch.ones((batch_size, num_queries, num_hiddens))
-    Y = torch.ones((batch_size, num_kvpairs, num_hiddens))
-    print(attention(X, Y, Y,valid_lens).shape)
+    # 测试轻量级注意力模块
+    batch_size = 4
+    seq_len_p = 5  # 行人序列长度
+    seq_len_v = 8  # 车辆序列长度
+    feature_dim = 2
+
+    pedestrian_feat = torch.randn(batch_size, seq_len_p, feature_dim)
+    vehicle_feats = torch.randn(batch_size, seq_len_v, feature_dim)
+
+    model = LightweightAttention(feature_dim=feature_dim, hidden_dim=16)
+    enhanced_pedestrian_feat = model(pedestrian_feat, vehicle_feats)
+
+    print("输入行人特征形状:", pedestrian_feat.shape)
+    print("输入车辆特征形状:", vehicle_feats.shape)
+    print("输出增强后行人特征形状:", enhanced_pedestrian_feat.shape)
