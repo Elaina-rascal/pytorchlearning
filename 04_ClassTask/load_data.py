@@ -63,7 +63,11 @@ def LoadData(file_path, min_len=7,sheet_name='sheet1') -> tuple[list[torch.Tenso
     encoder_inputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in encoder_inputs]
     decoder_inputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in decoder_inputs]
     decoder_outputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in decoder_outputs]
-    
+    #去除时间戳
+    for i in range(len(encoder_inputs_tensor)):
+        encoder_inputs_tensor[i]=encoder_inputs_tensor[i][:,1:]
+        decoder_inputs_tensor[i]=decoder_inputs_tensor[i][:,1:]
+        decoder_outputs_tensor[i]=decoder_outputs_tensor[i][:,1:]
     return encoder_inputs_tensor, decoder_inputs_tensor, decoder_outputs_tensor
 def create_batch(
     encoder_inputs,

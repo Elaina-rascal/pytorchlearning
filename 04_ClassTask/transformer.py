@@ -128,7 +128,7 @@ class Encoder(nn.Module):
                  num_heads, num_layers, dropout=0.1, bias=False):
         super().__init__()
         self.nn=nn.Linear(feature_size,num_hiddens)
-        self.pos_encoding=PositionalEncoding(num_hiddens, dropout)
+        # self.pos_encoding=PositionalEncoding(num_hiddens, dropout)
         self.blks = nn.Sequential()
         for i in range(num_layers):
             self.blks.add_module("encoder_blk_%d",EncoderBlock(key_size,query_size,
@@ -139,8 +139,6 @@ class Encoder(nn.Module):
     def forward(self, X:torch.Tensor,attn_mask:torch.Tensor):
         # 在以下代码段中，X的形状保持不变:(batch_size，序列长度，num_hiddens)
         X=self.nn(X)
-        X = self.pos_encoding(X * math.sqrt(
-            self.pos_encoding.P.shape[-1]))
         for blk in self.blks:
             X = blk(X, attn_mask)
         return X
@@ -202,7 +200,7 @@ class TransformDecoder(nn.Module):
         self.num_hiddens = num_hiddens
         self.num_layers = num_layers
         self.nn=nn.Linear(feature_size,num_hiddens)
-        self.pos_encoding=PositionalEncoding(num_hiddens, dropout)
+        # self.pos_encoding=PositionalEncoding(num_hiddens, dropout)
         self.blks=nn.Sequential()
         for i in range(num_layers):
             self.blks.add_module("decoder_blk_%d",DecoderBlock(
@@ -216,8 +214,6 @@ class TransformDecoder(nn.Module):
         #     self.embedding.embedding_dim))
         #先经过nn
         X=self.nn(X)
-        X = self.pos_encoding(X * math.sqrt(
-            self.pos_encoding.P.shape[-1]))
         self._attention_weights = [[None] * len(self.blks) for _ in range (2)]
         for i,blk in enumerate(self.blks):
             X, state = blk(X, state)
