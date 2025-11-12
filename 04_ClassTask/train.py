@@ -7,7 +7,7 @@ import torch.nn as nn
 
 def train():
     # 超参数设置
-    lr, num_epochs,batch_size,seq_min_len ,device = 0.005, 2000, 80,7,torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    lr, num_epochs,batch_size,seq_min_len ,device = 0.001, 500, 80,7,torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     #编码器序列长度，特征长度，解码器特征长度，隐藏单元数
     seq_len=20
     # 数据加载
@@ -25,9 +25,10 @@ def train():
     # encoder=Encoder(feature_size=encoder_feature_size,key_size=num_hiddens,query_size=num_hiddens,value_size=num_hiddens,num_hiddens=num_hiddens,norm_shape=[num_hiddens],ffn_num_input=num_hiddens,ffn_num_hiddens=ffn_num_hiddens,num_heads=num_heads,num_layers=num_layer).to(device)
     # decoder=TransformDecoder(feature_size=decoder_feature_size,key_size=num_hiddens,query_size=num_hiddens,value_size=num_hiddens,num_hiddens=num_hiddens,norm_shape=[num_hiddens],ffn_num_input=num_hiddens,ffn_num_hiddens=ffn_num_hiddens,num_heads=num_heads,num_layers=num_layer).to(device)
     # transformer = Transformer(encoder, decoder).to(device)
-    transformer=LightweightAttention().to(device)
+    transformer=LightweightAttention(hidden_dim=8).to(device)
     # 平方损失
-    loss_fn = nn.MSELoss()
+    loss_fn = AmplifiedResidualLoss().to(device)
+    # 优化器与学习率调度器
     optimizer = optim.Adam(transformer.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
     

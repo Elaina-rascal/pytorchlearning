@@ -7,10 +7,17 @@ class LightweightAttention(nn.Module):
         super().__init__()
         self.feature_dim = feature_dim
         self.hidden_dim = hidden_dim
-        
+        self.sq=nn.Sequential()
+        self.sq.add_module('linear1',nn.Linear(feature_dim,hidden_dim*2))
+        self.sq.add_module('relu',nn.ReLU())
+        self.sq.add_module('linear2',nn.Linear(hidden_dim*2,hidden_dim))
+        self.sq2=nn.Sequential()
+        self.sq2.add_module('linear1',nn.Linear(feature_dim,hidden_dim*2))
+        self.sq2.add_module('relu',nn.ReLU())
+        self.sq2.add_module('linear2',nn.Linear(hidden_dim*2,hidden_dim))
         # 特征映射层（将2维特征映射到隐藏维度）
-        self.proj_p = nn.Linear(feature_dim, hidden_dim)  # 行人特征映射
-        self.proj_v = nn.Linear(feature_dim, hidden_dim)  # 车辆特征映射
+        # self.proj_p = nn.Linear(feature_dim, hidden_dim)  # 行人特征映射
+        # self.proj_v = nn.Linear(feature_dim, hidden_dim)  # 车辆特征映射
         
         # 自注意力参数（查询/键/值线性变换）
         self.q_self = nn.Linear(hidden_dim, hidden_dim)
@@ -38,10 +45,13 @@ class LightweightAttention(nn.Module):
         residual = pedestrian_feat  # 残差连接起点
         batch_size = pedestrian_feat.shape[0]
         
+        # pedestrian_feat=self.sq(pedestrian_feat)
+        # vehicle_feats=self.sq(vehicle_feats)
         # 1. 特征映射到高维
-        p_hidden = self.proj_p(pedestrian_feat)  # (B, P, H)
-        v_hidden = self.proj_v(vehicle_feats)    # (B, V, H)
-        
+        # p_hidden = self.proj_p(pedestrian_feat)  # (B, P, H)
+        # v_hidden = self.proj_v(vehicle_feats)    # (B, V, H)
+        p_hidden = self.sq(pedestrian_feat)
+        v_hidden = self.sq2(vehicle_feats)
         # 2. 行人自查询（使用PyTorch内置scaled_dot_product_attention）
         q_self = self.q_self(p_hidden)  # (B, P, H)
         k_self = self.k_self(p_hidden)  # (B, P, H)
@@ -50,6 +60,7 @@ class LightweightAttention(nn.Module):
         self_attn_out = F.scaled_dot_product_attention(
             q_self, k_self, v_self, 
             attn_mask=None, 
+            is_causal=True if self.training else False,
             dropout_p=self.dropout.p if self.training else 0.0
         )  # (B, P, H)
         
@@ -61,6 +72,7 @@ class LightweightAttention(nn.Module):
         cross_attn_out = F.scaled_dot_product_attention(
             q_cross, k_cross, v_cross, 
             attn_mask=None, 
+            is_causal=True if self.training else False,
             dropout_p=self.dropout.p if self.training else 0.0
         )  # (B, P, H)
         
@@ -69,6 +81,33 @@ class LightweightAttention(nn.Module):
         output = residual +output  # 残差+层归一化
         
         return output
+import torch
+import torch.nn as nn
+
+class AmplifiedResidualLoss(nn.Module):
+    def __init__(self, threshold=0.05, scale=10.0, penalty_weight=100.0):
+        super().__init__()
+        self.threshold = threshold  # 预期最大误差
+        self.scale = scale  # 残差放大系数
+        self.penalty_weight = penalty_weight  # 超阈值惩罚权重
+
+    def forward(self, pred, target):
+        # 计算残差（L1残差，更适合误差约束）
+        residual = torch.abs(pred - target)
+        
+        # 1. 放大残差（增强对小误差的敏感性）
+        scaled_residual = residual * self.scale
+        
+        # 2. 对超过阈值的残差添加额外惩罚
+        penalty = torch.where(
+            residual > self.threshold,
+            (residual - self.threshold) * self.penalty_weight,
+            torch.zeros_like(residual)
+        )
+        
+        # 总损失 = 放大后的残差均值 + 超阈值惩罚均值
+        total_loss = torch.mean(scaled_residual) + torch.mean(penalty)
+        return total_loss
 if __name__== "__main__":
     # 测试轻量级注意力模块
     batch_size = 4

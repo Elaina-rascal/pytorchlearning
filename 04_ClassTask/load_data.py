@@ -1,14 +1,23 @@
 import pandas as pd
-import torch,random
+import torch,random,os
 from collections import defaultdict
 
-def LoadData(file_path, min_len=7,sheet_name='sheet1') -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+def LoadData(file_path, min_len=7,sheet_name='sheet1',cache_dir='/pytorch/models/') -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
     '''
     加载行人轨迹预测数据集，返回编码器输入、解码器输入、解码器输出
     编码器输入：同一时刻对应的车辆中心点及时间帧(t, x, y)
     解码器输入：行人的历史踪迹（有效长度>5）(t, x, y)
     解码器输出：与解码器输入相同
     '''
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, f"{sheet_name}_cache.pt")
+    
+    # 检查缓存是否存在
+    if os.path.exists(cache_file):
+        print(f"加载缓存数据: {cache_file}")
+        return torch.load(cache_file)
+    
+    # 原数据加载逻辑...（保持不变）
     # 读取原始xlsx文件
     data = pd.read_excel(file_path, sheet_name=None)
     df = data[sheet_name][['时间帧', 'ID', '类别', '中心坐标x', '中心坐标y']].copy()
@@ -68,6 +77,11 @@ def LoadData(file_path, min_len=7,sheet_name='sheet1') -> tuple[list[torch.Tenso
         encoder_inputs_tensor[i]=encoder_inputs_tensor[i][:,1:]
         decoder_inputs_tensor[i]=decoder_inputs_tensor[i][:,1:]
         decoder_outputs_tensor[i]=decoder_outputs_tensor[i][:,1:]
+    # 保存缓存
+    torch.save(
+        (encoder_inputs_tensor, decoder_inputs_tensor, decoder_outputs_tensor),
+        cache_file
+    )
     return encoder_inputs_tensor, decoder_inputs_tensor, decoder_outputs_tensor
 def create_batch(
     encoder_inputs,
