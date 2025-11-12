@@ -35,10 +35,10 @@ def infer(transformer:Transformer, src_sentence:str, src_vocab:Vocab, tgt_vocab:
     translated_tokens= tgt_vocab.to_tokens(tgt_indices)
     return ' '.join(translated_tokens)
 def main():
-    num_hiddens, num_layers, dropout,  = 32, 2, 0.1, 
-    ffn_num_input, ffn_num_hiddens, num_heads = 32, 64, 4
-    key_size, query_size, value_size = 32, 32, 32
-    norm_shape = [32]
+    num_hiddens, num_layers, dropout,  = 64, 4, 0.1, 
+    ffn_num_input, ffn_num_hiddens, num_heads = 64, 128, 4
+    key_size, query_size, value_size = 64, 64, 64
+    norm_shape = [64]
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # 加载词表
     data_path = "/home/Elaina/pytorch/Data/cmn.txt"
