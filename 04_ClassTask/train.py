@@ -9,8 +9,8 @@ def train():
     # 超参数设置
     lr, num_epochs,batch_size,seq_min_len ,device = 0.005, 2000, 80,7,torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     #编码器序列长度，特征长度，解码器特征长度，隐藏单元数
-    seq_len=20;encoder_feature_size=2;decoder_feature_size=2;num_hiddens=4
-    ffn_num_hiddens, num_heads,num_layer = 8, 1,1
+    seq_len=20;encoder_feature_size=2;decoder_feature_size=2;num_hiddens=6
+    ffn_num_hiddens, num_heads,num_layer = 12, 1,1
     # 数据加载
     file_path = "/pytorch/Data/data.xlsx"
     # 加载原始数据
