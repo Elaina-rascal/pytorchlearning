@@ -53,7 +53,7 @@ def train():
         #移动到设备
         enc_batch, dec_in_batch, dec_out_batch = enc_batch.to(device), dec_in_batch.to(device), dec_out_batch.to(device)
         #前向传播
-        outputs = transformer(dec_in_batch, enc_batch)
+        outputs,weights = transformer(dec_in_batch, enc_batch)
         loss = loss_fn(outputs, dec_out_batch)
         model_manager.updateVisualization(epoch, loss.item())
         #反向传播与优化

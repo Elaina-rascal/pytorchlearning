@@ -82,12 +82,15 @@ def infer(n: int, step_num: int, model_path: str = '/pytorch/models/task.pth'):
             
             for _ in range(step_num):
                 # 模型预测下一步
-                pred_step = model(current_seq.unsqueeze(0), enc_history.unsqueeze(0))[0, -1:]
+                pred_step,weights = model(current_seq.unsqueeze(0), enc_history.unsqueeze(0))
+                pred_step = pred_step.squeeze(0)[-1:]  # 取最后一步预测结果
                 preds.append(pred_step)
                 
                 # 将预测结果加入输入序列，用于下一步预测
                 current_seq = torch.cat([current_seq, pred_step], dim=0)
-            
+                #打印attention权重
+                print(f"样本 {idx} 第 {_+1} 步 Attention 权重:")
+                print(weights.squeeze(0).cpu().numpy())
             # 整理预测结果
             pred_future = torch.cat(preds, dim=0)
             

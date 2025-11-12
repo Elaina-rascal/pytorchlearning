@@ -1,86 +1,54 @@
 import torch.nn as nn
 from torch.nn import functional as F
 import torch
+import torch.nn as nn
+from torch.nn import functional as F
+import torch
+
 class LightweightAttention(nn.Module):
-    """轻量级注意力模块 先行人自查询,再与车辆特征交叉查询"""
-    def __init__(self, feature_dim=2, hidden_dim=16, dropout=0.1):
+    """轻量级注意力模块（仅保留行人自查询）"""
+    def __init__(self, feature_dim=2, hidden_dim=16, dropout=0.0):
         super().__init__()
         self.feature_dim = feature_dim
         self.hidden_dim = hidden_dim
-        self.sq=nn.Sequential()
-        self.sq.add_module('linear1',nn.Linear(feature_dim,hidden_dim*2))
-        self.sq.add_module('relu',nn.ReLU())
-        self.sq.add_module('linear2',nn.Linear(hidden_dim*2,hidden_dim))
-        self.sq2=nn.Sequential()
-        self.sq2.add_module('linear1',nn.Linear(feature_dim,hidden_dim*2))
-        self.sq2.add_module('relu',nn.ReLU())
-        self.sq2.add_module('linear2',nn.Linear(hidden_dim*2,hidden_dim))
-        # 特征映射层（将2维特征映射到隐藏维度）
-        # self.proj_p = nn.Linear(feature_dim, hidden_dim)  # 行人特征映射
-        # self.proj_v = nn.Linear(feature_dim, hidden_dim)  # 车辆特征映射
         
-        # 自注意力参数（查询/键/值线性变换）
-        self.q_self = nn.Linear(hidden_dim, hidden_dim)
-        self.k_self = nn.Linear(hidden_dim, hidden_dim)
-        self.v_self = nn.Linear(hidden_dim, hidden_dim)
+        # 行人特征映射序列
+        self.sq = nn.Sequential(
+            nn.Linear(feature_dim, hidden_dim*2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim*2, hidden_dim)
+        )
+        self.attn=nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=1,dropout=dropout,batch_first=True)
         
-        # 交叉注意力参数（行人-车辆）
-        self.q_cross = nn.Linear(hidden_dim, hidden_dim)
-        self.k_cross = nn.Linear(hidden_dim, hidden_dim)
-        self.v_cross = nn.Linear(hidden_dim, hidden_dim)
+        # # 自注意力参数（查询/键/值线性变换）
+        # self.q_self = nn.Linear(hidden_dim, hidden_dim)
+        # self.k_self = nn.Linear(hidden_dim, hidden_dim)
+        # self.v_self = nn.Linear(hidden_dim, hidden_dim)
         
         # 输出层与残差连接
         self.output_proj = nn.Linear(hidden_dim, feature_dim)
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(feature_dim)
         
-    def forward(self, pedestrian_feat, vehicle_feats):
+    def forward(self, pedestrian_feat, vehicle_feats=None):  # 车辆特征变为可选参数
         """
         Args:
             pedestrian_feat: 行人特征 (batch_size, seq_len_p, 2)
-            vehicle_feats: 车辆特征 (batch_size, seq_len_v, 2)
+            vehicle_feats: 车辆特征（仅保留参数位置，实际不使用）
         Returns:
             增强后的行人特征 (batch_size, seq_len_p, 2)
         """
         residual = pedestrian_feat  # 残差连接起点
-        batch_size = pedestrian_feat.shape[0]
         
-        # pedestrian_feat=self.sq(pedestrian_feat)
-        # vehicle_feats=self.sq(vehicle_feats)
         # 1. 特征映射到高维
-        # p_hidden = self.proj_p(pedestrian_feat)  # (B, P, H)
-        # v_hidden = self.proj_v(vehicle_feats)    # (B, V, H)
-        p_hidden = self.sq(pedestrian_feat)
-        v_hidden = self.sq2(vehicle_feats)
-        # 2. 行人自查询（使用PyTorch内置scaled_dot_product_attention）
-        q_self = self.q_self(p_hidden)  # (B, P, H)
-        k_self = self.k_self(p_hidden)  # (B, P, H)
-        v_self = self.v_self(p_hidden)  # (B, P, H)
-        # 自注意力计算（无掩码）
-        self_attn_out = F.scaled_dot_product_attention(
-            q_self, k_self, v_self, 
-            attn_mask=None, 
-            is_causal=True if self.training else False,
-            dropout_p=self.dropout.p if self.training else 0.0
-        )  # (B, P, H)
+        p_hidden = self.sq(pedestrian_feat)  # (B, P, H)
         
-        # 3. 与车辆特征交叉查询（行人查询，车辆提供键值）
-        q_cross = self.q_cross(self_attn_out)  # (B, P, H)
-        k_cross = self.k_cross(v_hidden)       # (B, V, H)
-        v_cross = self.v_cross(v_hidden)       # (B, V, H)
-        # 交叉注意力计算（无掩码）
-        cross_attn_out = F.scaled_dot_product_attention(
-            q_cross, k_cross, v_cross, 
-            attn_mask=None, 
-            is_causal=True if self.training else False,
-            dropout_p=self.dropout.p if self.training else 0.0
-        )  # (B, P, H)
-        
-        # 4. 输出映射与残差连接
-        output = self.output_proj(cross_attn_out)  # (B, P, 2)
-        output = residual +output  # 残差+层归一化
-        
-        return output
+        # 2. 行人自注意力计算
+        X,weights=self.attn(p_hidden,p_hidden,p_hidden, need_weights=True)
+        #残差连接与输出映射
+        output = self.output_proj(self.dropout(X)) + residual
+
+        return output,weights
 import torch
 import torch.nn as nn
 
