@@ -2,7 +2,7 @@
     "name": "pytorch-container",
     "dockerComposeFile": "docker-compose.yml",
     "service": "gpu-service",
-    "workspaceFolder": "/home/Elaina/pytorch",
+    "workspaceFolder": "/pytorch",
     "shutdownAction": "stopCompose",
     "customizations": {
         "vscode": {
