@@ -69,6 +69,7 @@ def create_batch(
     encoder_inputs,
     decoder_inputs,
     decoder_outputs,
+    encoder_seq_len: int,
     seq_len: int,
     batch_size: int
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -76,7 +77,7 @@ def create_batch(
     将数据转换为单批次格式 [batch_size, seq_len, feature_size]
     
     参数:
-        encoder_inputs: 编码器输入列表
+        encoder_inputs: 编码器输入列表（可处理任意长度，不足时会填充）
         decoder_inputs: 解码器输入列表
         decoder_outputs: 解码器输出列表
         seq_len: 每个子序列的固定长度
@@ -86,19 +87,18 @@ def create_batch(
         三个张量，形状均为 [batch_size, seq_len, feature_size]
     
     异常:
-        当有效样本数不足batch_size时抛出ValueError
+        当解码器有效样本数不足batch_size时抛出ValueError
     '''
-    # 筛选出长度足够的样本索引（所有序列都满足长度要求）
+    # 筛选出解码器长度足够的样本索引（只要求解码器序列满足长度要求）
     valid_indices = []
-    for i in range(len(encoder_inputs)):
-        if (len(encoder_inputs[i]) >= seq_len and 
-            len(decoder_inputs[i]) >= seq_len and 
+    for i in range(len(decoder_inputs)):
+        if (len(decoder_inputs[i]) >= seq_len and 
             len(decoder_outputs[i]) >= seq_len):
             valid_indices.append(i)
     
     # 检查有效样本数是否足够
     if len(valid_indices) < batch_size:
-        raise ValueError(f"有效样本数不足（需要{batch_size}个，实际只有{len(valid_indices)}个）")
+        raise ValueError(f"解码器有效样本数不足（需要{batch_size}个，实际只有{len(valid_indices)}个）")
     
     # 随机选择batch_size个样本
     selected_indices = random.sample(valid_indices, batch_size)
@@ -108,18 +108,34 @@ def create_batch(
     batch_dec_out = []
     
     for idx in selected_indices:
-        # 获取当前样本的完整序列
+        # 处理编码器输入（不足长度时填充）
         enc_seq = encoder_inputs[idx]
+        enc_len = len(enc_seq)
+        
+        if enc_len >= encoder_seq_len:
+            # 长度足够时随机截取
+            max_start = enc_len - encoder_seq_len
+            start = random.randint(0, max_start)
+            end = start + encoder_seq_len
+            processed_enc = enc_seq[start:end]
+        else:
+            # 长度不足时填充（使用0填充）
+            # 获取特征维度
+            feature_size = enc_seq[0].shape[-1] if enc_len > 0 else decoder_inputs[idx][0].shape[-1]
+            # 创建填充张量
+            pad_length = encoder_seq_len - enc_len
+            pad_tensor = torch.zeros(pad_length, feature_size, dtype=enc_seq.dtype) if enc_len > 0 else torch.zeros(pad_length, feature_size)
+            processed_enc = torch.cat([enc_seq, pad_tensor], dim=0)
+        
+        # 处理解码器输入（保持原有逻辑）
         dec_in_seq = decoder_inputs[idx]
         dec_out_seq = decoder_outputs[idx]
         
-        # 随机选择子序列的起始位置
-        max_start = len(enc_seq) - seq_len
+        max_start = len(dec_in_seq) - seq_len
         start = random.randint(0, max_start)
         end = start + seq_len
         
-        # 截取固定长度的子序列
-        batch_enc.append(enc_seq[start:end])
+        batch_enc.append(processed_enc)
         batch_dec_in.append(dec_in_seq[start:end])
         batch_dec_out.append(dec_out_seq[start:end])
     
@@ -154,6 +170,7 @@ if __name__ == "__main__":
                 encoder_inputs,
                 decoder_inputs,
                 decoder_outputs,
+                encoder_seq_len=20,
                 seq_len=seq_len,
                 batch_size=batch_size
             )
