@@ -4,6 +4,7 @@ from torch import nn, functional as F
 class MultiAttention(nn.Module):
     """多头自注意力机制"""
     def __init__(self, key_size,query_size,value_size,num_hiddens,num_heads,dropout=0.1,bias=False):
+        self.num_heads=1
         self.num_heads = num_heads
         self.attention = nn.functional.scaled_dot_product_attention
         super().__init__()  
@@ -11,7 +12,7 @@ class MultiAttention(nn.Module):
         self.W_k = nn.Linear(key_size, num_hiddens, bias=bias)
         self.W_v = nn.Linear(value_size, num_hiddens, bias=bias)
         self.W_o = nn.Linear(num_hiddens, num_hiddens, bias=bias)
-    def transpose_qkv(X:torch.Tensor, num_heads):
+    def transpose_qkv(self,X:torch.Tensor, num_heads):
         """为了多注意力头的并行计算而变换形状"""
         # 输入X的形状:(batch_size，查询或者“键－值”对的个数，num_hiddens)
         # 输出X的形状:(batch_size，查询或者“键－值”对的个数，num_heads，
@@ -38,12 +39,12 @@ class MultiAttention(nn.Module):
         return mask.unsqueeze(1)  # 扩展维度以匹配注意力权重的形状
     
     #@save
-    def transpose_output(X:torch.Tensor, num_heads):
+    def transpose_output(self,X:torch.Tensor, num_heads):
         """逆转transpose_qkv函数的操作"""
         X = X.reshape(-1, num_heads, X.shape[1], X.shape[2])
         X = X.permute(0, 2, 1, 3)
         return X.reshape(X.shape[0], X.shape[1], -1)
-    def forward(self, queries:torch.Tensor, keys:torch.Tensor, values:torch.Tensor,attn_mask:torch.Tensor=None,is_causal:bool=False):
+    def forward(self, queries:torch.Tensor, keys:torch.Tensor, values:torch.Tensor,attn_mask=None,is_causal:bool=False):
         # queries，keys，values的形状:
         # (batch_size，查询或者“键－值”对的个数，num_hiddens)
         # valid_lens　　的形状:
@@ -51,9 +52,9 @@ class MultiAttention(nn.Module):
         # 经过变换后，输出的queries，keys，values的形状:
         # (batch_size*num_heads，查询或者“键－值”对的个数，
         # num_hiddens/num_heads)
-        queries = MultiAttention.transpose_qkv(self.W_q(queries), self.num_heads)
-        keys = MultiAttention.transpose_qkv(self.W_k(keys), self.num_heads)
-        values = MultiAttention.transpose_qkv(self.W_v(values), self.num_heads)
+        queries = self.transpose_qkv(self.W_q(queries), self.num_heads)
+        keys = self.transpose_qkv(self.W_k(keys), self.num_heads)
+        values = self.transpose_qkv(self.W_v(values), self.num_heads)
         if attn_mask is not None:
         # 原始 attn_mask 形状：[batch_size, seq_len_q,query_len]
         # 第二个表示当前维度,第三个表示被查询维度
@@ -65,7 +66,7 @@ class MultiAttention(nn.Module):
 
         # output_concat的形状:(batch_size，查询或者“键－值”对的个数，
         # num_hiddens)
-        output_concat = MultiAttention.transpose_output(output, self.num_heads)
+        output_concat = self.transpose_output(output, self.num_heads)
 
         return self.W_o(output_concat)
 class PositionFFN(nn.Module):
