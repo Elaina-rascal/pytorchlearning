@@ -2,3 +2,7 @@ data/
 *.pyc
 *.pth
 .~*
+# 例外：不忽略 .gitkeep（确保文件夹被 Git 跟踪）
+!models/.gitkeep
+models/** 
+
