@@ -14,7 +14,7 @@ def train():
     norm_shape = [64]
 
     # 数据加载
-    data_path = "/home/Elaina/pytorch/Data/cmn.txt"
+    data_path = "/pytorch/Data/cmn.txt"
     src_lang, tgt_lang = 'en', 'zh'
     src_sents, tgt_sents = read_translation_data(data_path)
     print(f"读取到 {len(src_sents)} 条平行语料")
@@ -61,9 +61,9 @@ def train():
     loss_fn = nn.CrossEntropyLoss(ignore_index=0)
     optimizer = optim.Adam(transformer.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
-
+    
     # 初始化模型管理器
-    model_manager = SaveAndVisual()
+    model_manager = SaveAndVisual(model_dir='/pytorch/models',loss_img_path='/pytorch/models'+'loss_curve.png')
     best_loss = model_manager.load_model(transformer, optimizer, device)
     existing_model_loss = best_loss
 
