@@ -22,7 +22,7 @@ def infer(n: int, step_num: int, model_path: str = '/pytorch/models/task.pth'):
     print("加载数据中...")
     file_path = "/pytorch/Data/data.xlsx"
     encoder_inputs, decoder_inputs, decoder_outputs = [], [], []
-    for i in range(1):
+    for i in range(4):
         sheet_name = 'Sheet' + str(i + 1)
         enc, dec_in, dec_out = LoadData(file_path, 7, sheet_name)
         encoder_inputs.extend(enc)
@@ -44,7 +44,7 @@ def infer(n: int, step_num: int, model_path: str = '/pytorch/models/task.pth'):
     print(f"已选择{len(selected_indices)}个样本进行推理")
     
     # 2. 加载模型
-    model = GRUEnhancer(hidden_dim=6).to(device)
+    model = GRUEnhancer(hidden_dim=8).to(device)
     
     # 加载模型权重
     if not os.path.exists(model_path):
@@ -153,6 +153,6 @@ def visualize_results(preds, actuals, errors):
 if __name__ == "__main__":
     try:
         # 示例：预测5个行人的后续10步轨迹
-        infer(n=5, step_num=4)
+        infer(n=5, step_num=5)
     except Exception as e:
         print(f"推理过程出错: {str(e)}")

@@ -15,7 +15,7 @@ def train():
     # 加载原始数据
     encoder_inputs, decoder_inputs, decoder_outputs = [],[],[]
     #增加sheet1-4的数据
-    for i in range(1):
+    for i in range(4):
         sheet_name='Sheet'+str(i+1)
         once_encoder_inputs,once_decorder_inputs,once_decoder_outputs=LoadData(file_path,7,sheet_name)
         encoder_inputs+=once_encoder_inputs
@@ -25,7 +25,7 @@ def train():
     # encoder=Encoder(feature_size=encoder_feature_size,key_size=num_hiddens,query_size=num_hiddens,value_size=num_hiddens,num_hiddens=num_hiddens,norm_shape=[num_hiddens],ffn_num_input=num_hiddens,ffn_num_hiddens=ffn_num_hiddens,num_heads=num_heads,num_layers=num_layer).to(device)
     # decoder=TransformDecoder(feature_size=decoder_feature_size,key_size=num_hiddens,query_size=num_hiddens,value_size=num_hiddens,num_hiddens=num_hiddens,norm_shape=[num_hiddens],ffn_num_input=num_hiddens,ffn_num_hiddens=ffn_num_hiddens,num_heads=num_heads,num_layers=num_layer).to(device)
     # transformer = Transformer(encoder, decoder).to(device)
-    transformer=GRUEnhancer(hidden_dim=6).to(device)
+    transformer=GRUEnhancer(hidden_dim=8).to(device)
     # 平方损失
     loss_fn = nn.MSELoss()
     # 优化器与学习率调度器

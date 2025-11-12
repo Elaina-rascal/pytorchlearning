@@ -4,79 +4,85 @@ from collections import defaultdict
 
 def LoadData(file_path, min_len=7,sheet_name='sheet1',cache_dir='/pytorch/models/') -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
     '''
-    加载行人轨迹    编码器输入：同一时刻对应的车辆中心点 (x, y)
-    解码器输入：行人的历史踪迹（x, y, delta_x, delta_y），其中delta为与前一帧的差值
-    解码器输出：与解码器输入相同（含速度特征）
+    加载行人轨迹预测数据集，返回编码器输入、解码器输入、解码器输出
+    编码器输入：同一时刻对应的车辆中心点及时间帧(t, x, y)
+    解码器输入：行人的历史踪迹（有效长度>5）(t, x, y)
+    解码器输出：与解码器输入相同
     '''
     os.makedirs(cache_dir, exist_ok=True)
     cache_file = os.path.join(cache_dir, f"{sheet_name}_cache.pt")
     
+    # 检查缓存是否存在
     if os.path.exists(cache_file):
         print(f"加载缓存数据: {cache_file}")
         return torch.load(cache_file)
     
+    # 原数据加载逻辑...（保持不变）
+    # 读取原始xlsx文件
     data = pd.read_excel(file_path, sheet_name=None)
     df = data[sheet_name][['时间帧', 'ID', '类别', '中心坐标x', '中心坐标y']].copy()
+    
+    # 将类别文本转换为数字（Vehicle->0，Pedestrian->1）
     df['类别'] = df['类别'].map({'Vehicle': 0, 'Pedestrian': 1})
     
+    # 分离车辆和行人数据
     vehicle_df = df[df['类别'] == 0].copy()
     pedestrian_df = df[df['类别'] == 1].copy()
     
+    # 按ID分组，收集每个行人的轨迹（按时间帧排序）
     pedestrian_trajectories = defaultdict(list)
     for _, row in pedestrian_df.sort_values('时间帧').iterrows():
         pedestrian_trajectories[row['ID']].append((row['时间帧'], row['中心坐标x'], row['中心坐标y']))
     
+    # 筛选出有效长度>5的行人轨迹
     valid_trajectories = []
     for traj in pedestrian_trajectories.values():
         if len(traj) > min_len:
             valid_trajectories.append(traj)
     
+    # 构建解码器输入和输出（这里使用相同的轨迹，实际应用中可能需要移位）
     decoder_inputs = []
     decoder_outputs = []
     encoder_inputs = []
     
+    # 为每个有效行人轨迹构建对应的输入输出
     for traj in valid_trajectories:
-        # 提取坐标序列 (t, x, y)
-        coords = [(t, x, y) for t, x, y in traj]
-        # 计算速度特征 (delta_x, delta_y)，第一个位置速度为(0,0)
-        velocities = []
-        for i in range(len(coords)):
-            if i == 0:
-                velocities.append((0.0, 0.0))  # 初始速度为0
-            else:
-                delta_x = coords[i][1] - coords[i-1][1]  # 当前x - 前一x
-                delta_y = coords[i][2] - coords[i-1][2]  # 当前y - 前一y
-                velocities.append((delta_x, delta_y))
-        
-        # 解码器输入：(x, y, delta_x, delta_y)（去除时间戳前先整合特征）
-        dec_in = [
-            (coords[i][1], coords[i][2], velocities[i][0], velocities[i][1])
-            for i in range(len(coords))
-        ]
+        # 解码器输入：行人历史轨迹 (时间帧, x, y)
+        dec_in = [(t, x, y) for t, x, y in traj]
         decoder_inputs.append(dec_in)
-        decoder_outputs.append(dec_in)  # 输出与输入结构一致
         
-        # 编码器输入处理（保持不变，仅x,y）
+        # 解码器输出：与输入相同（实际训练时可能需要做位移，如dec_in[1:] + [last_element]）
+        decoder_outputs.append(dec_in)
+        
+        # 编码器输入：同一时刻对应的车辆中心点及时间帧 (t, x, y)
         enc_in = []
         for t, _, _ in traj:
+            # 获取该时间帧所有车辆的中心点
             vehicles_at_time = vehicle_df[vehicle_df['时间帧'] == t][['中心坐标x', '中心坐标y']].values
+            # 如果该时刻没有车辆，使用零向量表示（包含时间帧t）
             if len(vehicles_at_time) == 0:
-                enc_in.append([t, 0.0, 0.0])
+                enc_in.append([t, 0.0, 0.0])  # 加入时间帧t
             else:
-                enc_in.append([t, vehicles_at_time[0][0], vehicles_at_time[0][1]])
+                # 这里使用第一个车辆的坐标，也可以修改为平均值等
+                enc_in.append([t, vehicles_at_time[0][0], vehicles_at_time[0][1]])  # 加入时间帧t
+        
         encoder_inputs.append(enc_in)
     
-    # 转换为tensor并去除时间戳
-    encoder_inputs_tensor = [torch.tensor(seq, dtype=torch.float32)[:, 1:] for seq in encoder_inputs]  # 保留(x,y)
-    decoder_inputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in decoder_inputs]  # 保留(x,y,dx,dy)
-    decoder_outputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in decoder_outputs]  # 保留(x,y,dx,dy)
-    
+    # 转换为tensor格式（返回列表形式，因轨迹长度可能不同）
+    encoder_inputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in encoder_inputs]
+    decoder_inputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in decoder_inputs]
+    decoder_outputs_tensor = [torch.tensor(seq, dtype=torch.float32) for seq in decoder_outputs]
+    #去除时间戳
+    for i in range(len(encoder_inputs_tensor)):
+        encoder_inputs_tensor[i]=encoder_inputs_tensor[i][:,1:]
+        decoder_inputs_tensor[i]=decoder_inputs_tensor[i][:,1:]
+        decoder_outputs_tensor[i]=decoder_outputs_tensor[i][:,1:]
+    # 保存缓存
     torch.save(
         (encoder_inputs_tensor, decoder_inputs_tensor, decoder_outputs_tensor),
         cache_file
     )
     return encoder_inputs_tensor, decoder_inputs_tensor, decoder_outputs_tensor
-
 def create_batch(
     encoder_inputs,
     decoder_inputs,
