@@ -1,52 +1,32 @@
 version: '3'
+
+# 定义公共配置（x-开头的扩展字段，可被复用）
+x-common:
+  # 定义别名，用于引用
+  &common
+  environment:
+    - DISPLAY=${DISPLAY}
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+    - OMP_WAIT_POLICY=passive
+    - TERM=xterm-256color
+  volumes:
+    - /tmp/.X11-unix:/tmp/.X11-unix
+    - ./..:/pytorch # 注意：原cpu服务是/pytorch/，这里统一为/pytorch（路径末尾斜杠不影响实际映射）
+  entrypoint: [ '/bin/bash' ]
+  stdin_open: true
+  tty: true
+  working_dir: "/pytorch"
+
 services:
   pytorch-service:
-    # build:
-    #   context: ..
-    #   dockerfile: .devcontainer/Dockerfile
-    image: elainasuki/other:pytorch
-    container_name: pytorch-container
-    environment:
-      - DISPLAY=${DISPLAY}
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-      - OMP_WAIT_POLICY=passive
-      - TERM=xterm-256color
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ./..:/home/Elaina/pytorch
-      - /dev:/dev
-    network_mode: host
-    pid: "host" # 添加 pid 命名空间共享
-    ipc: "host" # 添加 ipc 命名空间共享    
-    privileged: true
-    stdin_open: true
-    tty: true
-    user: "Elaina"
-    # runtime: "nvidia"
-    working_dir: "/home/Elaina/pytorch" # 指定默认工作目录
+    <<: *common # 引用公共配置
+    image: elainasuki/other:pytorch_cpu
+    container_name: pytorch-cpu-container
+    # 不需要runtime，保持默认（原配置中已注释）
+
   gpu-service:
-    # build:
-    #   context: ..
-    #   dockerfile: .devcontainer/Dockerfile
+    <<: *common # 引用公共配置
     image: elainasuki/other:pytorch_gpu
     container_name: pytorch-gpu-container
-    environment:
-      - DISPLAY=${DISPLAY}
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-      - OMP_WAIT_POLICY=passive
-      - TERM=xterm-256color
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ./..:/home/Elaina/pytorch
-      - /dev:/dev
-    network_mode: host
-    pid: "host" # 添加 pid 命名空间共享
-    ipc: "host" # 添加 ipc 命名空间共享    
-    privileged: true
-    stdin_open: true
-    tty: true
-    user: "Elaina"
-    runtime: "nvidia"
-    working_dir: "/home/Elaina/pytorch" # 指定默认工作目录
+    runtime: "nvidia" # 仅GPU服务需要的特殊配置
