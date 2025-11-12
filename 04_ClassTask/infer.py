@@ -1,5 +1,5 @@
 from load_data import *
-from transformer import *
+from model import *
 import torch
 import os
 import matplotlib.pyplot as plt
@@ -44,7 +44,7 @@ def infer(n: int, step_num: int, model_path: str = '/pytorch/models/task.pth'):
     print(f"已选择{len(selected_indices)}个样本进行推理")
     
     # 2. 加载模型
-    model = LightweightAttention(hidden_dim=8).to(device)
+    model = GRUEnhancer(hidden_dim=8).to(device)
     
     # 加载模型权重
     if not os.path.exists(model_path):
@@ -89,8 +89,8 @@ def infer(n: int, step_num: int, model_path: str = '/pytorch/models/task.pth'):
                 # 将预测结果加入输入序列，用于下一步预测
                 current_seq = torch.cat([current_seq, pred_step], dim=0)
                 #打印attention权重
-                print(f"样本 {idx} 第 {_+1} 步 Attention 权重:")
-                print(weights.squeeze(0).cpu().numpy())
+                # print(f"样本 {idx} 第 {_+1} 步 Attention 权重:")
+                # print(weights.squeeze(0).cpu().numpy())
             # 整理预测结果
             pred_future = torch.cat(preds, dim=0)
             

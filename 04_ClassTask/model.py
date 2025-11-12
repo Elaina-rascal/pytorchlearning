@@ -76,6 +76,71 @@ class AmplifiedResidualLoss(nn.Module):
         # 总损失 = 放大后的残差均值 + 超阈值惩罚均值
         total_loss = torch.mean(scaled_residual) + torch.mean(penalty)
         return total_loss
+class SequenceXYNorm(nn.Module):
+    def __init__(self, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, 2)，其中最后一维[0]是x，[1]是y
+        # 计算每个序列的x和y的均值（按seq_len维度求平均）
+        mean = x.mean(dim=1, keepdim=True)  # 形状: (batch_size, 1, 2)，分别对应x和y的均值
+        # 计算每个序列的x和y的方差
+        var = x.var(dim=1, keepdim=True, unbiased=False)  # 形状: (batch_size, 1, 2)，分别对应x和y的方差
+        scale_factor = 0.5  # 可根据需要调整（越小放大越明显）
+        # 对x和y分别归一化：(x - mean_x)/sqrt(var_x + eps)，(y - mean_y)/sqrt(var_y + eps)
+        x_normed = (x - mean) / torch.sqrt(var*scale_factor + self.eps)
+        return x_normed
+class GRUEnhancer(nn.Module):
+    """基于GRU的特征增强模块，适合输入输出变化较小的场景"""
+    def __init__(self, feature_dim=2, hidden_dim=16, dropout=0.0, eps=1e-6):
+        super().__init__()
+        self.feature_dim = feature_dim
+        self.hidden_dim = hidden_dim
+        self.ln = SequenceXYNorm(eps=eps)
+        # 输入特征映射
+        self.input_proj = nn.Linear(feature_dim, hidden_dim)
+        
+        # GRU层 - 更适合处理序列变化较小的情况
+        self.gru = nn.GRU(
+            input_size=hidden_dim,
+            hidden_size=hidden_dim,
+            num_layers=2,
+            batch_first=True,
+            dropout=dropout,
+            bidirectional=False  # 单向GRU更适合预测任务
+        )
+        
+        # 输出映射与残差连接
+        self.output_proj = nn.Linear(hidden_dim, feature_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(feature_dim)
+        # 增加跳跃连接以保留原始特征
+        self.skip_weight = nn.Parameter(torch.tensor(0.5))  # 控制跳跃连接权重
+
+    def forward(self, pedestrian_feat, vehicle_feats=None):
+        """
+        Args:
+            pedestrian_feat: 行人特征 (batch_size, seq_len_p, 2)
+            vehicle_feats: 车辆特征（可选，未使用）
+        Returns:
+            增强后的行人特征 (batch_size, seq_len_p, 2)
+        """
+        residual = pedestrian_feat  # 残差连接
+        #增加归一化
+        pedestrian_feat = self.ln(pedestrian_feat)
+        # 1. 特征映射到高维
+        p_hidden = self.input_proj(pedestrian_feat)  # (B, P, H)
+        
+        # 2. GRU处理序列
+        gru_out, _ = self.gru(p_hidden)  # (B, P, H)
+        
+        # 3. 输出映射与残差融合
+        output = self.output_proj(self.dropout(gru_out))
+        output=output+residual
+        # 4. 加权残差连接（对于变化小的特征更友好）
+        
+        return output, None  # 无注意力权重，返回None
 if __name__== "__main__":
     # 测试轻量级注意力模块
     batch_size = 4
